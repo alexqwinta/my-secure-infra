@@ -1,0 +1,78 @@
+name: Infrastructure Security & Integration Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  # 1. СТАТИЧНИЙ АНАЛІЗ (Блокування 22 порту та публічних S3)
+  static-analysis:
+    name: Security Scan (Checkov & tfsec)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Запуск Checkov з вашими кастомними правилами
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          external_checks_dirs: checkov_rules
+          check: CUSTOM_K8S_22,CKV_AWS_20,CKV_AWS_24
+          soft_fail: false # ПРОВАЛИТИ білд, якщо знайдено вразливість
+
+      # Коментування помилок прямо в коді Pull Request
+      - name: tfsec PR commenter
+        uses: tfsec/tfsec-pr-commenter-action@main
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+  # 2. ІНТЕГРАЦІЙНІ ТЕСТИ (Перевірка в Minikube/Kind)
+  integration-tests:
+    name: Terratest in Minikube
+    needs: static-analysis # Запуск тільки якщо статика пройшла
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      # Створення локального K8s кластера в CI
+      - name: Setup Minikube (Kind)
+        uses: helm/kind-action@v1.8.0
+
+      - name: Run Terratest
+        run: |
+          cd test
+          go mod tidy
+          go test -v minikube_test.go
+
+steps:
+      # ... (попередні кроки Checkov та Terratest) ...
+
+      # Цей крок запускається лише при помилці (if: failure())
+      - name: Send Slack Notification on Failure
+        if: failure()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_CHANNEL: alerts-security
+          SLACK_COLOR: '#FF0000' # Червоний колір для помилки
+          SLACK_ICON: https://github.com
+          SLACK_TITLE: "🚨 Security Violation Detected!"
+          SLACK_MESSAGE: |
+            *Repository:* ${{ github.repository }}
+            *Author:* ${{ github.actor }}
+            *Issue:* Checkov found open port 22 or public S3.
+            *Action:* Deployment BLOCKED.
+            *Details:* <https://github.com{{ github.run_id }}|View Logs>
