@@ -1,0 +1,20 @@
+repos:
+  # 1. Базові перевірки Terraform
+  - repo: https://github.com
+    rev: v1.86.0 # Перевір актуальну версію
+    hooks:
+      - id: terraform_fmt      # Авто-форматування коду
+      - id: terraform_validate # Перевірка синтаксису
+
+  # 2. Сканування безпеки (Checkov)
+  - repo: https://github.com
+    rev: 3.2.0 # Перевір актуальну версію
+    hooks:
+      - id: checkov
+        verbose: true
+        args: [
+          "--directory", ".",
+          "--check", "CKV_AWS_24,CKV_AWS_20,CUSTOM_K8S_22", # Твої критичні порти та S3
+          "--external-checks-dir", "checkov_rules",        # Твоє кастомне правило для порту 22
+          "--soft-fail", "false"                           # БЛОКУВАТИ коміт при помилці
+        ]
